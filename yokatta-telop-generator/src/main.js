@@ -4,7 +4,7 @@
 const state = {
   text: 'よかったこの距離で',
   subtext: '',
-  fontFamily: "'極太明朝', serif",
+  fontFamily: "'極太明朝', 'Shippori Mincho', serif",
   fontSize: 140,        // 文字サイズ: 140
   letterSpacing: -10,   // 文字間隔: -10
   textColor: '#FFFFFF',  // 色: 白
@@ -51,25 +51,21 @@ const elements = {};
 // Theme Manager State
 let currentTheme = localStorage.getItem('yokatta_theme') || 'light';
 
-document.addEventListener('DOMContentLoaded', async () => {
-  try {
-    initDOMElements();
-    initTheme();
-    initCanvas();
-    bindEvents(); // CRITICAL FIX: Bind button events FIRST so UI is ALWAYS interactive!
-  } catch (err) {
-    console.error('Initialization error:', err);
-  }
+// DOM Ready Initialization
+document.addEventListener('DOMContentLoaded', () => {
+  initDOMElements();
+  initTheme();
+  initCanvas();
+  bindEvents();
 
-  // Load assets safely without blocking UI
-  try {
-    await loadDefaultAssets();
-  } catch (err) {
-    console.warn('Asset loading notice:', err);
-  }
+  // 1. Initialize Pattern Image synchronously from Base64
+  initDefaultPattern();
 
-  // Initial Render
+  // 2. Render Canvas IMMEDIATELY (0ms delay, zero async blocking)
   render();
+
+  // 3. Load custom font in background asynchronously
+  loadCustomFontInBackground();
 });
 
 function initTheme() {
@@ -183,39 +179,42 @@ function initCanvas() {
   canvas.height = 1080;
 }
 
-// Resilient asset loading (Supports Netlify & local file://)
-async function loadDefaultAssets() {
-  // 1. Safe Font Loader
-  try {
-    const fontPath = './font/極太明朝.ttf';
-    const font = new FontFace('極太明朝', `url('${fontPath}')`);
-    const loadedFont = await font.load();
-    document.fonts.add(loadedFont);
-    console.log('極太明朝.ttf successfully loaded');
-  } catch (fontErr) {
-    console.warn('Font load notice (CSS @font-face fallback active):', fontErr);
-  }
-
-  // 2. Safe Pattern Loader
+// Synchronous Pattern Initialization from Base64
+function initDefaultPattern() {
   try {
     const src = (typeof DEFAULT_PATTERN_BASE64 !== 'undefined') ? DEFAULT_PATTERN_BASE64 : './pattern.png';
-    state.patternImg = await loadImage(src);
-    if (elements.patternTilePreview) {
-      elements.patternTilePreview.style.backgroundImage = `url('${src}')`;
-    }
+    const img = new Image();
+    img.onload = () => {
+      state.patternImg = img;
+      if (elements.patternTilePreview) {
+        elements.patternTilePreview.style.backgroundImage = `url('${src}')`;
+      }
+      render();
+    };
+    img.onerror = () => {
+      console.warn('Pattern base64 load error, using procedural pattern fallback');
+      state.patternImg = createFallbackPatternImage();
+      render();
+    };
+    img.src = src;
+    state.patternImg = img;
   } catch (err) {
-    console.warn('Pattern image fallback engaged', err);
+    console.warn('Pattern init exception:', err);
     state.patternImg = createFallbackPatternImage();
   }
 }
 
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = (e) => reject(e);
-    img.src = src;
-  });
+// Background Font Loader
+async function loadCustomFontInBackground() {
+  try {
+    const font = new FontFace('極太明朝', "url('./font/極太明朝.ttf')");
+    const loadedFont = await font.load();
+    document.fonts.add(loadedFont);
+    console.log('極太明朝.ttf loaded');
+    render();
+  } catch (err) {
+    console.warn('Font load notice (CSS @font-face or fallback active):', err);
+  }
 }
 
 function createFallbackPatternImage() {
@@ -339,8 +338,8 @@ function bindEvents() {
   }
 
   if (elements.resetPatternBtn) {
-    elements.resetPatternBtn.addEventListener('click', async () => {
-      await loadDefaultAssets();
+    elements.resetPatternBtn.addEventListener('click', () => {
+      initDefaultPattern();
       render();
     });
   }
@@ -544,11 +543,19 @@ function drawTelop(cCtx, width, height) {
       patternSource = getScaledPatternCanvas(state.patternImg, state.patternScale);
     }
 
-    const pattern = cCtx.createPattern(patternSource, 'repeat');
-    cCtx.fillStyle = pattern;
-
-    drawRoundedRect(cCtx, bannerX, bannerY, bannerWidth, bannerHeight, state.bannerRadius);
-    cCtx.fill();
+    try {
+      const pattern = cCtx.createPattern(patternSource, 'repeat');
+      if (pattern) {
+        cCtx.fillStyle = pattern;
+        drawRoundedRect(cCtx, bannerX, bannerY, bannerWidth, bannerHeight, state.bannerRadius);
+        cCtx.fill();
+      }
+    } catch (e) {
+      console.warn('Pattern fill notice:', e);
+      cCtx.fillStyle = '#5A2A82';
+      drawRoundedRect(cCtx, bannerX, bannerY, bannerWidth, bannerHeight, state.bannerRadius);
+      cCtx.fill();
+    }
 
     if (state.bannerBorderWidth > 0) {
       cCtx.strokeStyle = state.bannerBorderColor;
